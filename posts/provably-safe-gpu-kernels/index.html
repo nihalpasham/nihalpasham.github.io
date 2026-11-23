@@ -699,7 +699,7 @@
       border-radius: 8px;
       padding: 9px 10px;
       color: var(--fg-body);
-      min-height: 118px;
+      min-height: 152px;
     }
 
     .assert-line {
@@ -746,11 +746,22 @@
       border: 1.5px solid var(--border-strong);
       border-radius: 10px;
       padding: 11px 16px;
+      min-height: 52px;
       display: flex;
       align-items: center;
       justify-content: space-between;
       gap: 12px;
       font-size: 13.5px;
+    }
+
+    @media (max-width: 760px) {
+      .pipe-status-bar {
+        min-height: 74px;
+      }
+    }
+
+    #rosettaCaption {
+      min-height: 44px;
     }
 
     .pipe-step-dots {
@@ -1239,7 +1250,7 @@
       <div class="preview-callout">
         <div class="preview-callout-title">Early Preview Notice</div>
         <div>
-          This feature is landing in <strong>preview</strong> (<code>cuda-oxide/oxide-proofs-preview/</code>). We are opening it up early so the Rust, GPU, and formal-verification communities can jump in with us. Expect rough edges, missing instructions, bugs, and probably soundness corners we have not thought of yet. Please try to break it!
+          This feature is in <strong>preview</strong> (<code>cuda-oxide/oxide-proofs-preview/</code>). We are opening it up early so the Rust, GPU, and formal-verification communities can jump in with us. Expect rough edges, missing instructions, bugs, and probably soundness corners we have not thought of yet. Please try to break it!
         </div>
       </div>
 
@@ -1564,7 +1575,7 @@
 
         <div class="pipe-status-bar">
           <div id="pipeStatusText">
-            <strong>Step 1 (Specify):</strong> You declare <em>what</em> safety properties hold on the Rust kernel.
+            <strong>Step 1 (Specify):</strong> Declare <em>what</em> safety properties hold on the Rust kernel.
           </div>
           <div class="pipe-step-dots" id="pipeDots">
             <span class="pipe-dot on"></span>
@@ -1850,7 +1861,7 @@
       <div class="cta-box">
         <h3>Help Us Stress-Test the Preview</h3>
         <p style="margin-bottom:0">
-          This is our first public preview of compile-time Lean 4 kernel verification in <code>cuda-oxide</code> (<a href="https://github.com/NVIDIA/cuda-rust/pull/1851" target="_blank" rel="noopener">PR #1851</a>). Unsupported MIR patterns fail closed at compile time, syntax will evolve, and there are almost certainly bugs and soundness edge cases waiting to be found. If you enjoy Rust, GPU kernels, compilers, or Lean 4, take it for a spin, try to break the verifier, and open an issue with whatever you hit!
+          Compile-time Lean 4 kernel verification is now in preview on <code>main</code> in <a href="https://github.com/NVIDIA/cuda-rust" target="_blank" rel="noopener"><code>cuda-oxide</code></a>. If you enjoy Rust, GPU kernels, compilers, or Lean 4, take it for a spin, try to break the verifier, and open an issue with whatever you hit!
         </p>
       </div>
     </article>
@@ -1946,10 +1957,10 @@
     const leanQedBadge = document.getElementById('leanQedBadge');
 
     const stageMessages = [
-      '<strong>Step 1 (Specify):</strong> You declare <em>what</em> safety properties hold on the Rust kernel.',
-      '<strong>Step 2 (Detour):</strong> The compiler pauses in memory before loop unrolling and collects the SSA blocks and bounds checks.',
-      '<strong>Step 3 (Verify):</strong> Lean 4 checks your kernel line by line against the specification with <code>0 sorryAx</code>.',
-      '<strong>Step 4 (Resume):</strong> Proven <code>mir.assert</code> checks are erased in memory, producing PTX with zero trap branches!'
+      '<strong>Step 1 (Specify):</strong> Declare <em>what</em> safety properties hold on the Rust kernel.',
+      '<strong>Step 2 (Detour):</strong> Pause before loop unrolling to collect SSA blocks and checks.',
+      '<strong>Step 3 (Verify):</strong> Prove every block and barrier against the spec in Lean 4 (<code>0 sorryAx</code>).',
+      '<strong>Step 4 (Resume):</strong> Erase proven <code>mir.assert</code> checks in memory and emit clean PTX.'
     ];
 
     let curStage = 0;
