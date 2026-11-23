@@ -1,0 +1,2095 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="light">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Provably Safe and Fast GPU Kernels in Rust | Nihal Pasham</title>
+  <meta name="description" content="Specify and verify safety properties on your Rust kernels, and emit fast PTX with zero runtime checks." />
+  <meta property="og:title" content="Provably Safe and Fast GPU Kernels in Rust" />
+  <meta property="og:description" content="Specify and verify safety properties on your Rust kernels, and emit fast PTX with zero runtime checks." />
+  <meta property="og:type" content="article" />
+  <meta property="og:url" content="https://nihalpasham.github.io/posts/provably-safe-gpu-kernels/" />
+  <meta name="twitter:card" content="summary_large_image" />
+  <script>
+    (function () {
+      var saved = localStorage.getItem('np-theme');
+      if (saved === 'dark' || saved === 'light') {
+        document.documentElement.setAttribute('data-theme', saved);
+      }
+    })();
+  </script>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600;700&display=swap" rel="stylesheet">
+  <style>
+    :root, [data-theme="light"] {
+      --bg: #ffffff;
+      --bg-subtle: #f8fafc;
+      --surface: #ffffff;
+      --surface-alt: #f1f5f9;
+      --border: #e2e8f0;
+      --border-strong: #cbd5e1;
+      --slate-outline: #334155;
+      --fg: #0f172a;
+      --fg-body: #1e293b;
+      --fg-muted: #64748b;
+      --fg-dim: #94a3b8;
+
+      /* MLC-inspired semantic palette */
+      --blue-bg: #dbeafe;
+      --blue-soft: #eff6ff;
+      --blue-border: #3b82f6;
+      --blue-text: #1e40af;
+
+      --violet-bg: #ede9fe;
+      --violet-soft: #f5f3ff;
+      --violet-border: #8b5cf6;
+      --violet-text: #5b21b6;
+
+      --emerald-bg: #dcfce7;
+      --emerald-soft: #f0fdf4;
+      --emerald-border: #059669;
+      --emerald-text: #065f46;
+
+      --amber-bg: #fef3c7;
+      --amber-soft: #fffbeb;
+      --amber-border: #d97706;
+      --amber-text: #92400e;
+
+      --red-bg: #fee2e2;
+      --red-soft: #fef2f2;
+      --red-border: #dc2626;
+      --red-text: #991b1b;
+
+      --code-bg: #0f172a;
+      --code-fg: #e2e8f0;
+      --shadow-sm: 0 1px 3px rgba(15, 23, 42, 0.06);
+      --shadow-md: 0 8px 24px rgba(15, 23, 42, 0.06);
+    }
+
+    [data-theme="dark"] {
+      --bg: #0b0f17;
+      --bg-subtle: #111827;
+      --surface: #151e2e;
+      --surface-alt: #1e293b;
+      --border: #263348;
+      --border-strong: #3b4c66;
+      --slate-outline: #94a3b8;
+      --fg: #f8fafc;
+      --fg-body: #cbd5e1;
+      --fg-muted: #94a3b8;
+      --fg-dim: #64748b;
+
+      --blue-bg: #172554;
+      --blue-soft: #111c3d;
+      --blue-border: #60a5fa;
+      --blue-text: #bfdbfe;
+
+      --violet-bg: #2e1065;
+      --violet-soft: #1e1145;
+      --violet-border: #a78bfa;
+      --violet-text: #ddd6fe;
+
+      --emerald-bg: #064e3b;
+      --emerald-soft: #052e24;
+      --emerald-border: #34d399;
+      --emerald-text: #a7f3d0;
+
+      --amber-bg: #451a03;
+      --amber-soft: #2e1304;
+      --amber-border: #fbbf24;
+      --amber-text: #fde68a;
+
+      --red-bg: #450a0a;
+      --red-soft: #2c0b0e;
+      --red-border: #f87171;
+      --red-text: #fecaca;
+
+      --code-bg: #090d14;
+      --code-fg: #e2e8f0;
+      --shadow-sm: 0 1px 3px rgba(0, 0, 0, 0.35);
+      --shadow-md: 0 10px 28px rgba(0, 0, 0, 0.45);
+    }
+
+    * { box-sizing: border-box; }
+
+    html {
+      scroll-behavior: smooth;
+      font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+      background: var(--bg);
+      color: var(--fg-body);
+      transition: background 0.2s ease, color 0.2s ease;
+    }
+
+    body {
+      margin: 0;
+      padding: 0;
+      line-height: 1.72;
+      font-size: 17.5px;
+      -webkit-font-smoothing: antialiased;
+    }
+
+    /* Reading progress bar */
+    .progress-bar {
+      position: fixed;
+      top: 0;
+      left: 0;
+      height: 3px;
+      width: 0%;
+      background: linear-gradient(90deg, var(--blue-border), var(--violet-border), var(--emerald-border));
+      z-index: 100;
+      transition: width 0.08s linear;
+    }
+
+    /* Sticky minimalist header */
+    .topbar {
+      position: sticky;
+      top: 0;
+      z-index: 50;
+      backdrop-filter: blur(12px);
+      -webkit-backdrop-filter: blur(12px);
+      background: color-mix(in srgb, var(--bg) 86%, transparent);
+      border-bottom: 1px solid var(--border);
+    }
+
+    .topbar-inner {
+      max-width: 920px;
+      margin: 0 auto;
+      padding: 12px 24px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 12px;
+    }
+
+    .brand {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      font-weight: 700;
+      font-size: 15px;
+      color: var(--fg);
+      text-decoration: none;
+    }
+
+    .brand-dot {
+      width: 10px;
+      height: 10px;
+      border-radius: 50%;
+      background: var(--emerald-border);
+      box-shadow: 0 0 0 4px var(--emerald-bg);
+    }
+
+    .topbar-actions {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+    }
+
+    .pill-badge {
+      font-family: 'JetBrains Mono', monospace;
+      font-size: 12px;
+      font-weight: 600;
+      padding: 4px 10px;
+      border-radius: 999px;
+      background: var(--amber-bg);
+      color: var(--amber-text);
+      border: 1px solid var(--amber-border);
+    }
+
+    .theme-btn {
+      font-family: 'Inter', sans-serif;
+      font-size: 13px;
+      font-weight: 600;
+      padding: 6px 12px;
+      border-radius: 8px;
+      border: 1px solid var(--border-strong);
+      background: var(--surface);
+      color: var(--fg);
+      cursor: pointer;
+      transition: all 0.15s ease;
+    }
+
+    .theme-btn:hover {
+      border-color: var(--blue-border);
+    }
+
+    /* Main container */
+    main {
+      max-width: 780px;
+      margin: 0 auto;
+      padding: 48px 24px 96px;
+    }
+
+    .post-meta {
+      display: flex;
+      flex-wrap: wrap;
+      align-items: center;
+      gap: 10px;
+      font-size: 14px;
+      color: var(--fg-muted);
+      margin-bottom: 14px;
+    }
+
+    .post-meta .sep { color: var(--fg-dim); }
+
+    h1 {
+      font-size: clamp(30px, 4.5vw, 42px);
+      line-height: 1.15;
+      letter-spacing: -0.025em;
+      font-weight: 800;
+      color: var(--fg);
+      margin: 0 0 18px;
+    }
+
+    .subtitle {
+      font-size: 20px;
+      line-height: 1.5;
+      color: var(--fg-muted);
+      margin: 0 0 28px;
+      font-weight: 400;
+    }
+
+    h2 {
+      font-size: 25px;
+      line-height: 1.25;
+      letter-spacing: -0.015em;
+      font-weight: 700;
+      color: var(--fg);
+      margin: 52px 0 16px;
+    }
+
+    p {
+      margin: 0 0 20px;
+    }
+
+    strong {
+      color: var(--fg);
+      font-weight: 650;
+    }
+
+    a {
+      color: var(--blue-border);
+      text-decoration: underline;
+      text-underline-offset: 3px;
+    }
+
+    code {
+      font-family: 'JetBrains Mono', ui-monospace, SFMono-Regular, Menlo, monospace;
+      font-size: 0.86em;
+      background: var(--surface-alt);
+      color: var(--fg);
+      padding: 2px 6px;
+      border-radius: 5px;
+      border: 1px solid var(--border);
+    }
+
+    /* Callout box */
+    .preview-callout {
+      background: var(--amber-soft);
+      border: 1.5px solid var(--amber-border);
+      border-radius: 12px;
+      padding: 16px 20px;
+      margin: 26px 0 32px;
+      font-size: 15.5px;
+      line-height: 1.6;
+    }
+
+    .preview-callout-title {
+      font-family: 'JetBrains Mono', monospace;
+      font-size: 12.5px;
+      font-weight: 700;
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+      color: var(--amber-text);
+      margin-bottom: 6px;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+
+    /* Code blocks */
+    .code-card {
+      background: var(--code-bg);
+      color: var(--code-fg);
+      border-radius: 12px;
+      border: 1px solid #1e293b;
+      margin: 24px 0 28px;
+      overflow: hidden;
+      box-shadow: var(--shadow-md);
+    }
+
+    .code-card-header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 9px 16px;
+      background: rgba(255, 255, 255, 0.04);
+      border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+      font-family: 'JetBrains Mono', monospace;
+      font-size: 12px;
+      color: #94a3b8;
+    }
+
+    .code-card pre {
+      margin: 0;
+      padding: 18px 20px;
+      overflow-x: auto;
+      font-family: 'JetBrains Mono', monospace;
+      font-size: 13.5px;
+      line-height: 1.6;
+    }
+
+    .code-card code {
+      background: transparent;
+      border: none;
+      padding: 0;
+      color: inherit;
+      font-size: inherit;
+    }
+
+    .tok-attr { color: #34d399; font-weight: 600; }
+    .tok-contract { color: #60a5fa; }
+    .tok-kw { color: #c084fc; }
+    .tok-fn { color: #fde047; }
+    .tok-ty { color: #67e8f9; }
+    .tok-cm { color: #64748b; }
+
+    /* =====================================================================
+       VISUAL CARDS (Wider breakout + MLC clean borders + smooth animations)
+       ===================================================================== */
+    .viz-card {
+      width: min(920px, calc(100vw - 32px));
+      margin-left: 50%;
+      transform: translateX(-50%);
+      margin-top: 30px;
+      margin-bottom: 34px;
+      background: var(--bg-subtle);
+      border: 2px solid var(--border-strong);
+      border-radius: 16px;
+      padding: 22px 24px 20px;
+      box-shadow: var(--shadow-md);
+    }
+
+    .viz-header {
+      display: flex;
+      flex-wrap: wrap;
+      align-items: center;
+      justify-content: space-between;
+      gap: 12px;
+      margin-bottom: 16px;
+    }
+
+    .viz-title-group {
+      display: flex;
+      flex-direction: column;
+      gap: 2px;
+    }
+
+    .viz-eyebrow {
+      font-family: 'JetBrains Mono', monospace;
+      font-size: 11.5px;
+      font-weight: 700;
+      text-transform: uppercase;
+      letter-spacing: 0.06em;
+      color: var(--fg-muted);
+    }
+
+    .viz-title {
+      font-size: 18px;
+      font-weight: 700;
+      color: var(--fg);
+      margin: 0;
+    }
+
+    .viz-controls {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      flex-wrap: wrap;
+    }
+
+    .seg-btn {
+      font-family: 'Inter', sans-serif;
+      font-size: 12.5px;
+      font-weight: 600;
+      padding: 6px 12px;
+      border-radius: 8px;
+      border: 1.5px solid var(--border-strong);
+      background: var(--surface);
+      color: var(--fg-muted);
+      cursor: pointer;
+      transition: all 0.16s ease;
+    }
+
+    .seg-btn:hover {
+      color: var(--fg);
+      border-color: var(--fg-muted);
+    }
+
+    .seg-btn.active-danger {
+      background: var(--red-bg);
+      border-color: var(--red-border);
+      color: var(--red-text);
+    }
+
+    .seg-btn.active-safe {
+      background: var(--emerald-bg);
+      border-color: var(--emerald-border);
+      color: var(--emerald-text);
+    }
+
+    .seg-btn.active-neutral {
+      background: var(--blue-bg);
+      border-color: var(--blue-border);
+      color: var(--blue-text);
+    }
+
+    .viz-caption {
+      margin-top: 14px;
+      font-size: 13.5px;
+      line-height: 1.5;
+      color: var(--fg-muted);
+      text-align: center;
+    }
+
+    /* ---------------------------------------------------------------------
+       ANIMATION 1: Three SIMT Hazards vs #[verify]
+       --------------------------------------------------------------------- */
+    .hazard-grid {
+      display: grid;
+      grid-template-columns: repeat(3, 1fr);
+      gap: 14px;
+    }
+
+    @media (max-width: 780px) {
+      .hazard-grid { grid-template-columns: 1fr; }
+    }
+
+    .hazard-box {
+      background: var(--surface);
+      border: 2px solid var(--border-strong);
+      border-radius: 12px;
+      padding: 14px 12px 12px;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      transition: border-color 0.25s ease;
+    }
+
+    .hazard-box.is-safe {
+      border-color: var(--emerald-border);
+    }
+
+    .hazard-box.is-buggy {
+      border-color: var(--red-border);
+    }
+
+    .hb-name {
+      font-size: 15px;
+      font-weight: 700;
+      color: var(--fg);
+      margin-bottom: 3px;
+    }
+
+    .hb-clause {
+      font-family: 'JetBrains Mono', monospace;
+      font-size: 12px;
+      font-weight: 600;
+      padding: 2px 8px;
+      border-radius: 6px;
+      margin-bottom: 8px;
+      transition: all 0.25s ease;
+    }
+
+    .is-buggy .hb-clause {
+      background: var(--red-bg);
+      color: var(--red-text);
+    }
+
+    .is-safe .hb-clause {
+      background: var(--emerald-bg);
+      color: var(--emerald-text);
+    }
+
+    .hb-svg {
+      width: 100%;
+      max-width: 260px;
+      height: 185px;
+      overflow: visible;
+    }
+
+    .hb-status {
+      font-size: 12.5px;
+      line-height: 1.4;
+      text-align: center;
+      color: var(--fg-muted);
+      min-height: 36px;
+      margin-top: 4px;
+    }
+
+    /* Packet motion keyframes for Visual 1 */
+    @keyframes pktDown {
+      0%   { transform: translateY(0px); opacity: 0; }
+      15%  { opacity: 1; }
+      75%  { transform: translateY(68px); opacity: 1; }
+      92%  { transform: translateY(68px); opacity: 0; }
+      100% { transform: translateY(0px); opacity: 0; }
+    }
+
+    @keyframes pktOob {
+      0%   { transform: translate(0px, 0px); opacity: 0; }
+      15%  { opacity: 1; }
+      70%  { transform: translate(14px, 68px); opacity: 1; }
+      90%  { transform: translate(14px, 68px); opacity: 0; }
+      100% { transform: translate(0px, 0px); opacity: 0; }
+    }
+
+    @keyframes flashDanger {
+      0%, 58%, 100% { opacity: 0.2; transform: scale(0.96); }
+      68%, 85%      { opacity: 1; transform: scale(1.05); }
+    }
+
+    @keyframes raceLeft {
+      0%   { transform: translate(0px, 0px); opacity: 0; }
+      15%  { opacity: 1; }
+      70%  { transform: translate(40px, 68px); opacity: 1; }
+      90%  { transform: translate(40px, 68px); opacity: 0; }
+      100% { transform: translate(0px, 0px); opacity: 0; }
+    }
+
+    @keyframes raceRightBuggy {
+      0%   { transform: translate(0px, 0px); opacity: 0; }
+      15%  { opacity: 1; }
+      70%  { transform: translate(-40px, 68px); opacity: 1; }
+      90%  { transform: translate(-40px, 68px); opacity: 0; }
+      100% { transform: translate(0px, 0px); opacity: 0; }
+    }
+
+    /* In safe mode: Phase 0 writes down BEFORE barrier, Phase 1 reads up AFTER barrier */
+    @keyframes safePhase0Straight {
+      0%   { transform: translateY(0px); opacity: 0; }
+      10%  { opacity: 1; }
+      40%  { transform: translateY(52px); opacity: 1; }
+      47%  { transform: translateY(52px); opacity: 0; }
+      100% { transform: translateY(0px); opacity: 0; }
+    }
+
+    @keyframes safeBarrierPulse {
+      0%, 38%, 62%, 100% { filter: brightness(1); }
+      46%, 55%           { filter: brightness(1.16); }
+    }
+
+    @keyframes safePhase1Straight {
+      0%, 54% { transform: translateY(0px); opacity: 0; }
+      60%     { opacity: 1; }
+      88%     { transform: translateY(-52px); opacity: 1; }
+      95%     { transform: translateY(-52px); opacity: 0; }
+      100%    { transform: translateY(0px); opacity: 0; }
+    }
+
+    @keyframes earlyExit {
+      0%   { transform: translate(0px, 0px); opacity: 0; }
+      15%  { opacity: 1; }
+      65%  { transform: translate(34px, 34px); opacity: 1; }
+      90%  { transform: translate(34px, 34px); opacity: 0; }
+      100% { transform: translate(0px, 0px); opacity: 0; }
+    }
+
+    .anim-pkt-down        { animation: pktDown 2.8s infinite ease-in-out; }
+    .anim-pkt-oob         { animation: pktOob 2.8s infinite ease-in-out; }
+    .anim-flash-danger    { animation: flashDanger 2.8s infinite ease-in-out; transform-box: fill-box; transform-origin: center; }
+    .anim-race-left       { animation: raceLeft 2.8s infinite ease-in-out; }
+    .anim-race-right-bug  { animation: raceRightBuggy 2.8s infinite ease-in-out; }
+    .anim-phase0-straight { animation: safePhase0Straight 3.4s infinite ease-in-out; }
+    .anim-barrier-pulse   { animation: safeBarrierPulse 3.4s infinite ease-in-out; }
+    .anim-phase1-straight { animation: safePhase1Straight 3.4s infinite ease-in-out; }
+    .anim-early-exit      { animation: earlyExit 2.8s infinite ease-in-out; }
+
+    /* ---------------------------------------------------------------------
+       ANIMATION 2: 4-Stage Proof Detour Pipeline
+       --------------------------------------------------------------------- */
+    .pipeline-grid {
+      display: grid;
+      grid-template-columns: repeat(4, 1fr);
+      gap: 12px;
+      position: relative;
+    }
+
+    @media (max-width: 820px) {
+      .pipeline-grid { grid-template-columns: repeat(2, 1fr); }
+    }
+
+    @media (max-width: 520px) {
+      .pipeline-grid { grid-template-columns: 1fr; }
+    }
+
+    .pipe-stage {
+      background: var(--surface);
+      border: 2px solid var(--border-strong);
+      border-radius: 12px;
+      padding: 14px 13px;
+      position: relative;
+      cursor: pointer;
+      transition: all 0.25s ease;
+      display: flex;
+      flex-direction: column;
+      justify-content: space-between;
+    }
+
+    .pipe-stage.active.s-rust {
+      border-color: var(--blue-border);
+      background: var(--blue-soft);
+      box-shadow: 0 0 0 3px color-mix(in srgb, var(--blue-border) 22%, transparent);
+    }
+
+    .pipe-stage.active.s-mir {
+      border-color: var(--violet-border);
+      background: var(--violet-soft);
+      box-shadow: 0 0 0 3px color-mix(in srgb, var(--violet-border) 22%, transparent);
+    }
+
+    .pipe-stage.active.s-lean {
+      border-color: var(--emerald-border);
+      background: var(--emerald-soft);
+      box-shadow: 0 0 0 3px color-mix(in srgb, var(--emerald-border) 22%, transparent);
+    }
+
+    .pipe-stage.active.s-ptx {
+      border-color: var(--emerald-border);
+      background: var(--emerald-soft);
+      box-shadow: 0 0 0 3px color-mix(in srgb, var(--emerald-border) 22%, transparent);
+    }
+
+    .ps-badge {
+      font-family: 'JetBrains Mono', monospace;
+      font-size: 11px;
+      font-weight: 700;
+      padding: 2px 7px;
+      border-radius: 5px;
+      display: inline-block;
+      margin-bottom: 6px;
+      width: fit-content;
+    }
+
+    .s-rust .ps-badge { background: var(--blue-bg); color: var(--blue-text); }
+    .s-mir  .ps-badge { background: var(--violet-bg); color: var(--violet-text); }
+    .s-lean .ps-badge { background: var(--emerald-bg); color: var(--emerald-text); }
+    .s-ptx  .ps-badge { background: var(--emerald-bg); color: var(--emerald-text); }
+
+    .ps-title {
+      font-size: 15px;
+      font-weight: 700;
+      color: var(--fg);
+      margin-bottom: 2px;
+    }
+
+    .ps-sub {
+      font-size: 12px;
+      color: var(--fg-muted);
+      margin-bottom: 10px;
+    }
+
+    .ps-code {
+      font-family: 'JetBrains Mono', monospace;
+      font-size: 11.2px;
+      line-height: 1.5;
+      background: var(--bg);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 9px 10px;
+      color: var(--fg-body);
+      min-height: 118px;
+    }
+
+    .assert-line {
+      display: block;
+      padding: 1px 4px;
+      margin: 1px -4px;
+      border-radius: 4px;
+      background: var(--amber-bg);
+      color: var(--amber-text);
+      font-weight: 600;
+      transition: all 0.45s cubic-bezier(0.4, 0, 0.2, 1);
+      max-height: 24px;
+      overflow: hidden;
+    }
+
+    .assert-line.erased {
+      text-decoration: line-through;
+      opacity: 0.22;
+      background: transparent;
+    }
+
+    .ptx-trap-line {
+      display: block;
+      color: var(--amber-text);
+      background: var(--amber-bg);
+      padding: 0 4px;
+      margin: 1px -4px;
+      border-radius: 4px;
+      max-height: 24px;
+      opacity: 1;
+      overflow: hidden;
+      transition: max-height 0.45s ease, opacity 0.35s ease, margin 0.45s ease;
+    }
+
+    .ptx-trap-line.vanished {
+      max-height: 0px;
+      opacity: 0;
+      margin: 0 -4px;
+    }
+
+    .pipe-status-bar {
+      margin-top: 14px;
+      background: var(--surface);
+      border: 1.5px solid var(--border-strong);
+      border-radius: 10px;
+      padding: 11px 16px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 12px;
+      font-size: 13.5px;
+    }
+
+    .pipe-step-dots {
+      display: flex;
+      gap: 6px;
+      flex-shrink: 0;
+    }
+
+    .pipe-dot {
+      width: 24px;
+      height: 6px;
+      border-radius: 99px;
+      background: var(--border-strong);
+      transition: all 0.25s ease;
+    }
+
+    .pipe-dot.on {
+      background: var(--emerald-border);
+      width: 36px;
+    }
+
+    /* ---------------------------------------------------------------------
+       ANIMATION 3: Interactive 1-to-1 Rosetta Stone + Break It Toggle
+       --------------------------------------------------------------------- */
+    .rosetta-cols {
+      display: grid;
+      grid-template-columns: repeat(3, 1fr);
+      gap: 10px;
+    }
+
+    @media (max-width: 820px) {
+      .rosetta-cols { grid-template-columns: 1fr; }
+    }
+
+    .rosetta-col {
+      background: var(--surface);
+      border: 2px solid var(--border-strong);
+      border-radius: 11px;
+      overflow: hidden;
+    }
+
+    .rc-head {
+      padding: 8px 12px;
+      font-family: 'JetBrains Mono', monospace;
+      font-size: 11.5px;
+      font-weight: 700;
+      border-bottom: 1.5px solid var(--border);
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+    }
+
+    .rc-rust .rc-head { background: var(--blue-soft); color: var(--blue-text); }
+    .rc-mir  .rc-head { background: var(--violet-soft); color: var(--violet-text); }
+    .rc-lean .rc-head { background: var(--emerald-soft); color: var(--emerald-text); }
+
+    .rc-rows {
+      padding: 8px;
+      display: flex;
+      flex-direction: column;
+      gap: 4px;
+    }
+
+    .rc-row {
+      font-family: 'JetBrains Mono', monospace;
+      font-size: 11.5px;
+      line-height: 1.45;
+      padding: 6px 8px;
+      border-radius: 6px;
+      border: 1.5px solid transparent;
+      cursor: pointer;
+      color: var(--fg-body);
+      transition: all 0.18s ease;
+    }
+
+    .rc-row:hover {
+      background: var(--surface-alt);
+    }
+
+    .rc-row.hl {
+      background: var(--blue-soft);
+      border-color: var(--blue-border);
+      color: var(--fg);
+      font-weight: 600;
+    }
+
+    .rc-mir .rc-row.hl {
+      background: var(--violet-soft);
+      border-color: var(--violet-border);
+    }
+
+    .rc-lean .rc-row.hl {
+      background: var(--emerald-soft);
+      border-color: var(--emerald-border);
+    }
+
+    .rc-row.hl-bug {
+      background: var(--red-soft) !important;
+      border-color: var(--red-border) !important;
+      color: var(--red-text) !important;
+    }
+
+    .lean-terminal {
+      margin-top: 14px;
+      background: #0d1117;
+      color: #e6edf3;
+      border-radius: 10px;
+      border: 1.5px solid var(--border-strong);
+      padding: 16px 20px;
+      font-family: 'JetBrains Mono', monospace;
+      font-size: 12.2px;
+      line-height: 1.65;
+      display: flex;
+      flex-direction: column;
+      gap: 9px;
+      transition: border-color 0.25s ease;
+    }
+
+    .lean-terminal code {
+      background: rgba(148, 163, 184, 0.14);
+      color: #93c5fd;
+      border: 1px solid rgba(148, 163, 184, 0.24);
+      padding: 2px 7px;
+      border-radius: 5px;
+      font-size: 11.8px;
+    }
+
+    .lean-terminal.term-ok {
+      border-color: var(--emerald-border);
+    }
+
+    .lean-terminal.term-err {
+      border-color: var(--red-border);
+    }
+
+    .term-ok-badge {
+      color: #3fb950;
+      font-weight: 700;
+    }
+
+    .term-err-badge {
+      color: #f85149;
+      font-weight: 700;
+    }
+
+    /* ---------------------------------------------------------------------
+       ANIMATION 4: Blackwell 2-CTA Pipeline + B200 Throughput Bars
+       --------------------------------------------------------------------- */
+    .bw-stages {
+      display: grid;
+      grid-template-columns: 1fr 28px 1fr 28px 1fr;
+      align-items: stretch;
+      gap: 4px;
+      margin-bottom: 18px;
+    }
+
+    @media (max-width: 820px) {
+      .bw-stages {
+        grid-template-columns: 1fr;
+      }
+      .bw-arrow { display: none; }
+    }
+
+    .bw-card {
+      background: var(--surface);
+      border: 2px solid;
+      border-radius: 12px;
+      padding: 13px 14px;
+      display: flex;
+      flex-direction: column;
+      justify-content: space-between;
+    }
+
+    .bw-prod { border-color: var(--blue-border); background: var(--blue-soft); }
+    .bw-mma  { border-color: var(--amber-border); background: var(--amber-soft); }
+    .bw-epi  { border-color: var(--emerald-border); background: var(--emerald-soft); }
+
+    .bw-role {
+      font-family: 'JetBrains Mono', monospace;
+      font-size: 11.5px;
+      font-weight: 700;
+      margin-bottom: 4px;
+    }
+
+    .bw-prod .bw-role { color: var(--blue-text); }
+    .bw-mma  .bw-role { color: var(--amber-text); }
+    .bw-epi  .bw-role { color: var(--emerald-text); }
+
+    .bw-head {
+      font-size: 15px;
+      font-weight: 700;
+      color: var(--fg);
+      margin-bottom: 8px;
+    }
+
+    .ring-slots {
+      display: grid;
+      grid-template-columns: repeat(7, 1fr);
+      gap: 4px;
+      margin: 6px 0 8px;
+    }
+
+    .ring-slot {
+      height: 22px;
+      border-radius: 4px;
+      border: 1.5px solid var(--blue-border);
+      background: var(--surface);
+      font-family: 'JetBrains Mono', monospace;
+      font-size: 10px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      color: var(--fg-muted);
+      transition: all 0.22s ease;
+    }
+
+    .ring-slot.active-fill {
+      background: var(--blue-border);
+      color: #ffffff;
+      font-weight: 700;
+      transform: translateY(-2px);
+    }
+
+    .ring-slot.active-read {
+      background: var(--amber-border);
+      border-color: var(--amber-border);
+      color: #ffffff;
+      font-weight: 700;
+    }
+
+    .tmem-halves {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 6px;
+      margin: 6px 0 8px;
+    }
+
+    .tmem-half {
+      padding: 6px 8px;
+      border-radius: 6px;
+      border: 1.5px solid var(--amber-border);
+      background: var(--surface);
+      font-family: 'JetBrains Mono', monospace;
+      font-size: 10.5px;
+      text-align: center;
+      color: var(--fg-muted);
+      transition: all 0.25s ease;
+    }
+
+    .tmem-half.ping {
+      background: var(--amber-border);
+      color: #ffffff;
+      font-weight: 700;
+    }
+
+    .epi-lanes {
+      display: grid;
+      grid-template-columns: repeat(4, 1fr);
+      gap: 5px;
+      margin: 6px 0 8px;
+    }
+
+    .epi-lane {
+      padding: 5px 4px;
+      border-radius: 5px;
+      border: 1.5px solid var(--emerald-border);
+      background: var(--surface);
+      font-family: 'JetBrains Mono', monospace;
+      font-size: 10px;
+      text-align: center;
+      color: var(--emerald-text);
+      font-weight: 600;
+      animation: lanePulse 1.8s infinite ease-in-out;
+    }
+
+    .epi-lane:nth-child(2) { animation-delay: 0.15s; }
+    .epi-lane:nth-child(3) { animation-delay: 0.30s; }
+    .epi-lane:nth-child(4) { animation-delay: 0.45s; }
+
+    @keyframes lanePulse {
+      0%, 100% { opacity: 0.72; transform: translateY(0); }
+      50%      { opacity: 1; transform: translateY(-2px); background: var(--emerald-bg); }
+    }
+
+    .bw-foot {
+      font-family: 'JetBrains Mono', monospace;
+      font-size: 11px;
+      color: var(--fg-muted);
+      margin-top: 4px;
+    }
+
+    .bw-arrow {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      color: var(--emerald-border);
+      font-weight: 800;
+      font-size: 20px;
+    }
+
+    /* Benchmark bars */
+    .bench-panel {
+      background: var(--surface);
+      border: 1.5px solid var(--border-strong);
+      border-radius: 12px;
+      padding: 14px 18px;
+    }
+
+    .bench-head {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      flex-wrap: wrap;
+      gap: 8px;
+      margin-bottom: 12px;
+      font-size: 13px;
+      font-weight: 700;
+      color: var(--fg);
+    }
+
+    .bench-legend {
+      display: flex;
+      gap: 14px;
+      font-size: 12px;
+      font-weight: 500;
+      color: var(--fg-muted);
+    }
+
+    .leg-swatch {
+      display: inline-block;
+      width: 10px;
+      height: 10px;
+      border-radius: 3px;
+      margin-right: 5px;
+      vertical-align: middle;
+    }
+
+    .bench-row {
+      display: grid;
+      grid-template-columns: 74px 1fr 94px;
+      align-items: center;
+      gap: 12px;
+      margin-bottom: 10px;
+    }
+
+    .bench-row:last-child { margin-bottom: 0; }
+
+    .bench-size {
+      font-family: 'JetBrains Mono', monospace;
+      font-size: 12.5px;
+      font-weight: 700;
+      color: var(--fg);
+    }
+
+    .bench-bars {
+      display: flex;
+      flex-direction: column;
+      gap: 4px;
+    }
+
+    .bar-track {
+      background: var(--surface-alt);
+      border-radius: 6px;
+      height: 18px;
+      overflow: hidden;
+      position: relative;
+    }
+
+    .bar-fill {
+      height: 100%;
+      border-radius: 6px;
+      display: flex;
+      align-items: center;
+      justify-content: flex-end;
+      padding-right: 8px;
+      font-family: 'JetBrains Mono', monospace;
+      font-size: 10.5px;
+      font-weight: 700;
+      color: #ffffff;
+      transition: width 1s cubic-bezier(0.22, 1, 0.36, 1);
+    }
+
+    .bar-unsafe { background: #64748b; }
+    .bar-safe   { background: var(--emerald-border); }
+
+    .bench-pct {
+      font-family: 'JetBrains Mono', monospace;
+      font-size: 12.5px;
+      font-weight: 700;
+      color: var(--emerald-text);
+      background: var(--emerald-bg);
+      padding: 3px 8px;
+      border-radius: 6px;
+      text-align: center;
+    }
+
+    /* Footer CTA */
+    .cta-box {
+      margin-top: 44px;
+      padding: 24px 26px;
+      border-radius: 14px;
+      background: var(--surface-alt);
+      border: 2px solid var(--border-strong);
+    }
+
+    .cta-box h3 {
+      margin: 0 0 8px;
+      font-size: 19px;
+      color: var(--fg);
+    }
+
+    ul {
+      padding-left: 22px;
+      margin: 0 0 22px;
+    }
+
+    li {
+      margin-bottom: 8px;
+    }
+
+    ul ul {
+      margin: 8px 0 4px;
+      padding-left: 20px;
+    }
+
+    ul ul li {
+      margin-bottom: 6px;
+      font-size: 16.5px;
+    }
+
+    h3.summary-subhead {
+      font-size: 19.5px;
+      line-height: 1.3;
+      font-weight: 700;
+      color: var(--fg);
+      margin: 30px 0 12px;
+    }
+
+    @media (prefers-reduced-motion: reduce) {
+      *, *::before, *::after {
+        animation-duration: 0.01ms !important;
+        animation-iteration-count: 1 !important;
+        transition-duration: 0.01ms !important;
+      }
+    }
+  </style>
+</head>
+<body>
+  <div class="progress-bar" id="progressBar"></div>
+
+  <header class="topbar">
+    <div class="topbar-inner">
+      <a href="/" class="brand">
+        <span class="brand-dot"></span>
+        <span>Nihal Pasham</span>
+      </a>
+      <div class="topbar-actions">
+        <span class="pill-badge">cuda-oxide · preview</span>
+        <button class="theme-btn" id="themeToggle" type="button">Dark mode</button>
+      </div>
+    </div>
+  </header>
+
+  <main>
+    <article>
+      <div class="post-meta">
+        <span>November 2026</span>
+        <span class="sep">&middot;</span>
+        <span>3.5 min read</span>
+        <span class="sep">&middot;</span>
+        <span>Rust &middot; GPU Compilers &middot; Lean 4</span>
+      </div>
+
+      <h1>Provably Safe and Fast GPU Kernels in Rust</h1>
+      <p class="subtitle">
+        Specify and verify safety properties on your Rust kernels, and emit fast PTX with zero runtime checks.
+      </p>
+
+      <p>
+        We have been working on something ambitious for the past couple of months, and we are finally ready to share it.
+      </p>
+      <p>
+        With <a href="https://github.com/NVIDIA/cuda-rust" target="_blank" rel="noopener"><code>cuda-oxide</code></a>, we can now write <strong>provably safe and fast GPU kernels completely in Rust</strong>, backed by compile-time <strong>Lean 4</strong> proofs. That means no <code>unsafe</code> blocks for shared memory or barriers, and no bounds-check tax inside hot GPU loops.
+      </p>
+
+      <div class="preview-callout">
+        <div class="preview-callout-title">Early Preview Notice</div>
+        <div>
+          This feature is landing in <strong>preview</strong> (<code>cuda-oxide/oxide-proofs-preview/</code>). We are opening it up early so the Rust, GPU, and formal-verification communities can jump in with us. Expect rough edges, missing instructions, bugs, and probably soundness corners we have not thought of yet. Please try to break it!
+        </div>
+      </div>
+
+      <h2>First: What Do We Mean by "Safe"?</h2>
+      <p>
+        On a CPU, <strong>Safe Rust</strong> means zero undefined behavior: no out-of-bounds memory accesses, no data races, and no dangling pointers. Notice what it does <em>not</em> mean. It does not prove functional correctness. If you write <code>a[i] - b[i]</code> when you meant <code>a[i] + b[i]</code>, your math is wrong, and Safe Rust will happily compile it.
+      </p>
+      <p>
+        On the GPU, if we want that same contract (<strong>memory safety and barrier safety</strong>), we don't need to prove functional correctness.
+      </p>
+      <p>
+        At the host launch boundary, <code>rustc</code> already gives us a strong foundation. Device buffers are guaranteed live and aligned, and the borrow checker ensures <code>&amp;a</code>, <code>&amp;b</code>, and <code>&amp;mut c</code> never alias each other.
+      </p>
+      <p>
+        What <code>rustc</code> does not provide is multi-thread reasoning inside the kernel body. <code>rustc</code> type-checks a kernel function as if a <strong>single thread</strong> called it, while the GPU runs thousands of threads through that function at the same time:
+      </p>
+
+      <!-- ===============================================================
+           ANIMATED VISUAL 1: THE 3 GPU HAZARDS vs #[verify]
+           =============================================================== -->
+      <section class="viz-card" aria-label="Three GPU SIMT safety hazards">
+        <div class="viz-header">
+          <div class="viz-title-group">
+            <span class="viz-eyebrow">Visual 1 &middot; Multi-Thread SIMT Safety</span>
+            <h3 class="viz-title">Three GPU Bugs Single-Thread Checking Does Not Catch</h3>
+          </div>
+          <div class="viz-controls">
+            <button class="seg-btn active-danger" id="btnHazardBuggy" type="button">Without #[verify] (Bugs)</button>
+            <button class="seg-btn" id="btnHazardSafe" type="button">With #[verify] (Proved Safe)</button>
+          </div>
+        </div>
+
+        <div class="hazard-grid" id="hazardGrid">
+          <!-- Card 1: OOB -->
+          <div class="hazard-box is-buggy" id="hbox1">
+            <div class="hb-name">1. Out-of-Bounds Index</div>
+            <div class="hb-clause">no_oob_idx(buf)</div>
+            <svg class="hb-svg" viewBox="0 0 252 178">
+              <!-- Thread circles -->
+              <text x="126" y="16" text-anchor="middle" font-size="10.5" fill="var(--fg-muted)">4 threads, 3-element slice</text>
+              <g font-family="JetBrains Mono, monospace" font-size="10" font-weight="700">
+                <circle cx="38" cy="40" r="13" fill="var(--emerald-soft)" stroke="var(--emerald-border)" stroke-width="2"/>
+                <text x="38" y="44" text-anchor="middle" fill="var(--emerald-text)">t0</text>
+                <circle cx="80" cy="40" r="13" fill="var(--emerald-soft)" stroke="var(--emerald-border)" stroke-width="2"/>
+                <text x="80" y="44" text-anchor="middle" fill="var(--emerald-text)">t1</text>
+                <circle cx="122" cy="40" r="13" fill="var(--emerald-soft)" stroke="var(--emerald-border)" stroke-width="2"/>
+                <text x="122" y="44" text-anchor="middle" fill="var(--emerald-text)">t2</text>
+                <circle id="oobT3Circle" cx="192" cy="40" r="13" fill="var(--red-soft)" stroke="var(--red-border)" stroke-width="2"/>
+                <text id="oobT3Text" x="192" y="44" text-anchor="middle" fill="var(--red-text)">t3</text>
+              </g>
+
+              <!-- Guide lines for valid threads -->
+              <line x1="38" y1="55" x2="38" y2="122" stroke="var(--emerald-border)" stroke-width="1.6" stroke-dasharray="3 3"/>
+              <line x1="80" y1="55" x2="80" y2="122" stroke="var(--emerald-border)" stroke-width="1.6" stroke-dasharray="3 3"/>
+              <line x1="122" y1="55" x2="122" y2="122" stroke="var(--emerald-border)" stroke-width="1.6" stroke-dasharray="3 3"/>
+
+              <!-- Buggy t3 OOB path -->
+              <g id="oobBugGroup">
+                <line x1="192" y1="55" x2="206" y2="122" stroke="var(--red-border)" stroke-width="1.8" stroke-dasharray="3 3"/>
+                <circle cx="192" cy="56" r="5" fill="var(--red-border)" class="anim-pkt-oob"/>
+                <g class="anim-flash-danger">
+                  <rect x="180" y="130" width="52" height="24" rx="4" fill="var(--red-bg)" stroke="var(--red-border)" stroke-width="1.8"/>
+                  <text x="206" y="146" text-anchor="middle" font-family="JetBrains Mono, monospace" font-size="9.5" font-weight="700" fill="var(--red-text)">OOB!</text>
+                </g>
+              </g>
+
+              <!-- Safe t3 guard stop (generous padding, stops cleanly at guard) -->
+              <g id="oobGuardGroup" style="display:none">
+                <line x1="192" y1="55" x2="192" y2="75" stroke="var(--blue-border)" stroke-width="1.6" stroke-dasharray="3 3"/>
+                <rect x="146" y="76" width="92" height="24" rx="6" fill="var(--blue-bg)" stroke="var(--blue-border)" stroke-width="1.5"/>
+                <text x="192" y="92" text-anchor="middle" font-family="JetBrains Mono, monospace" font-size="9.5" font-weight="700" fill="var(--blue-text)">idx &gt;= len</text>
+                <text x="192" y="114" text-anchor="middle" font-size="10" font-weight="600" fill="var(--fg-muted)">masked off</text>
+              </g>
+
+              <!-- Animated packets for t0..t2 -->
+              <circle cx="38" cy="56" r="4.5" fill="var(--emerald-border)" class="anim-pkt-down"/>
+              <circle cx="80" cy="56" r="4.5" fill="var(--emerald-border)" class="anim-pkt-down" style="animation-delay:0.12s"/>
+              <circle cx="122" cy="56" r="4.5" fill="var(--emerald-border)" class="anim-pkt-down" style="animation-delay:0.24s"/>
+
+              <!-- Slice slots [0] [1] [2] -->
+              <rect x="14" y="126" width="132" height="32" rx="6" fill="var(--bg-subtle)" stroke="var(--slate-outline)" stroke-width="1.8"/>
+              <rect x="18" y="130" width="38" height="24" rx="4" fill="var(--emerald-bg)" stroke="var(--emerald-border)" stroke-width="1.2"/>
+              <rect x="61" y="130" width="38" height="24" rx="4" fill="var(--emerald-bg)" stroke="var(--emerald-border)" stroke-width="1.2"/>
+              <rect x="104" y="130" width="38" height="24" rx="4" fill="var(--emerald-bg)" stroke="var(--emerald-border)" stroke-width="1.2"/>
+              <g font-family="JetBrains Mono, monospace" font-size="9.5" fill="var(--emerald-text)" font-weight="600">
+                <text x="37" y="146" text-anchor="middle">[0]</text>
+                <text x="80" y="146" text-anchor="middle" fill="var(--emerald-text)">[1]</text>
+                <text x="123" y="146" text-anchor="middle">[2]</text>
+              </g>
+            </svg>
+            <div class="hb-status" id="hstatus1">
+              Thread <code>t3</code> walks past <code>buf.len()</code> and corrupts adjacent memory.
+            </div>
+          </div>
+
+          <!-- Card 2: Shared Memory Race -->
+          <div class="hazard-box is-buggy" id="hbox2">
+            <div class="hb-name">2. Shared-Memory Race</div>
+            <div class="hb-clause">no_data_race(TILE)</div>
+            <svg class="hb-svg" viewBox="0 0 252 178">
+              <text id="raceSubLabel" x="126" y="16" text-anchor="middle" font-size="10.5" fill="var(--fg-muted)">same phase, no barrier between threads</text>
+
+              <!-- MODE A: Buggy colliding threads in same phase -->
+              <g id="raceBugGroup">
+                <g font-family="JetBrains Mono, monospace" font-size="10" font-weight="700">
+                  <circle cx="80" cy="40" r="13" fill="var(--red-soft)" stroke="var(--red-border)" stroke-width="2"/>
+                  <text x="80" y="44" text-anchor="middle" fill="var(--red-text)">t1</text>
+                  <circle cx="172" cy="40" r="13" fill="var(--red-soft)" stroke="var(--red-border)" stroke-width="2"/>
+                  <text x="172" y="44" text-anchor="middle" fill="var(--red-text)">t2</text>
+                </g>
+                <text x="52" y="74" font-family="JetBrains Mono, monospace" font-size="9.5" fill="var(--red-text)">write</text>
+                <text x="202" y="74" text-anchor="end" font-family="JetBrains Mono, monospace" font-size="9.5" fill="var(--red-text)">read</text>
+
+                <line x1="80" y1="55" x2="120" y2="124" stroke="var(--red-border)" stroke-width="1.7" stroke-dasharray="3 3"/>
+                <line x1="172" y1="55" x2="132" y2="124" stroke="var(--red-border)" stroke-width="1.7" stroke-dasharray="3 3"/>
+                <circle cx="80" cy="56" r="5" fill="var(--red-border)" class="anim-race-left"/>
+                <circle cx="172" cy="56" r="5" fill="var(--red-border)" class="anim-race-right-bug"/>
+
+                <rect x="40" y="126" width="172" height="32" rx="6" fill="var(--bg-subtle)" stroke="var(--slate-outline)" stroke-width="1.8"/>
+                <rect x="45" y="130" width="50" height="24" rx="4" fill="var(--surface)" stroke="var(--border-strong)"/>
+                <rect x="101" y="130" width="50" height="24" rx="4" fill="var(--red-bg)" stroke="var(--red-border)" stroke-width="1.8"/>
+                <rect x="157" y="130" width="50" height="24" rx="4" fill="var(--surface)" stroke="var(--border-strong)"/>
+                <text x="126" y="146" text-anchor="middle" font-family="JetBrains Mono, monospace" font-size="9.5" font-weight="700" fill="var(--red-text)">RACE!</text>
+              </g>
+
+              <!-- MODE B: Safe Phased Split (Left: Phase 0 t1 writes | Center: Barrier Wall | Right: Phase 1 t2 reads) -->
+              <g id="raceSafeGroup" style="display:none">
+                <defs>
+                  <marker id="arr-em" markerWidth="6" markerHeight="6" refX="5" refY="3" orient="auto">
+                    <path d="M0,0.5 L5.5,3 L0,5.5 Z" fill="var(--emerald-border)"/>
+                  </marker>
+                  <marker id="arr-bl" markerWidth="6" markerHeight="6" refX="5" refY="3" orient="auto">
+                    <path d="M0,0.5 L5.5,3 L0,5.5 Z" fill="var(--blue-border)"/>
+                  </marker>
+                </defs>
+                <!-- Left Column: Phase 0 (t1 writes TILE[1]) -->
+                <text x="54" y="34" text-anchor="middle" font-family="JetBrains Mono, monospace" font-size="9.5" font-weight="700" fill="var(--emerald-text)">Phase 0</text>
+                <circle cx="54" cy="54" r="12.5" fill="var(--emerald-soft)" stroke="var(--emerald-border)" stroke-width="2"/>
+                <text x="54" y="58" text-anchor="middle" font-family="JetBrains Mono, monospace" font-size="10" font-weight="700" fill="var(--emerald-text)">t1</text>
+                <line x1="54" y1="68" x2="54" y2="121" stroke="var(--emerald-border)" stroke-width="1.7" stroke-dasharray="3 3" marker-end="url(#arr-em)"/>
+                <text x="54" y="99" text-anchor="middle" font-family="JetBrains Mono, monospace" font-size="9" fill="var(--emerald-text)" stroke="var(--surface)" stroke-width="4" paint-order="stroke">write</text>
+                <circle cx="54" cy="69" r="4.8" fill="var(--emerald-border)" class="anim-phase0-straight"/>
+                <rect x="20" y="126" width="68" height="28" rx="5" fill="var(--emerald-bg)" stroke="var(--emerald-border)" stroke-width="1.6"/>
+                <text x="54" y="144" text-anchor="middle" font-family="JetBrains Mono, monospace" font-size="9.5" font-weight="700" fill="var(--emerald-text)">TILE[1]</text>
+
+                <!-- Center Vertical Barrier Wall -->
+                <g class="anim-barrier-pulse">
+                  <rect x="103" y="30" width="46" height="126" rx="6" fill="var(--violet-bg)" stroke="var(--violet-border)" stroke-width="1.6" stroke-dasharray="4 3"/>
+                  <text x="126" y="88" text-anchor="middle" font-family="JetBrains Mono, monospace" font-size="9.5" font-weight="700" fill="var(--violet-text)">BARRIER</text>
+                  <text x="126" y="103" text-anchor="middle" font-family="JetBrains Mono, monospace" font-size="8.5" font-weight="600" fill="var(--violet-text)">sync()</text>
+                </g>
+
+                <!-- Right Column: Phase 1 (t2 reads TILE[1] after barrier) -->
+                <text x="198" y="34" text-anchor="middle" font-family="JetBrains Mono, monospace" font-size="9.5" font-weight="700" fill="var(--blue-text)">Phase 1</text>
+                <circle cx="198" cy="54" r="12.5" fill="var(--blue-soft)" stroke="var(--blue-border)" stroke-width="2"/>
+                <text x="198" y="58" text-anchor="middle" font-family="JetBrains Mono, monospace" font-size="10" font-weight="700" fill="var(--blue-text)">t2</text>
+                <line x1="198" y1="124" x2="198" y2="71" stroke="var(--blue-border)" stroke-width="1.7" stroke-dasharray="3 3" marker-end="url(#arr-bl)"/>
+                <text x="198" y="99" text-anchor="middle" font-family="JetBrains Mono, monospace" font-size="9" fill="var(--blue-text)" stroke="var(--surface)" stroke-width="4" paint-order="stroke">read</text>
+                <circle cx="198" cy="121" r="4.8" fill="var(--blue-border)" class="anim-phase1-straight"/>
+                <rect x="164" y="126" width="68" height="28" rx="5" fill="var(--blue-bg)" stroke="var(--blue-border)" stroke-width="1.6"/>
+                <text x="198" y="144" text-anchor="middle" font-family="JetBrains Mono, monospace" font-size="9.5" font-weight="700" fill="var(--blue-text)">TILE[1]</text>
+              </g>
+            </svg>
+            <div class="hb-status" id="hstatus2">
+              <code>t1</code> writes while <code>t2</code> reads <code>TILE[1]</code> in the same step without a barrier.
+            </div>
+          </div>
+
+          <!-- Card 3: Divergent Barrier -->
+          <div class="hazard-box is-buggy" id="hbox3">
+            <div class="hb-name">3. Divergent Barrier</div>
+            <div class="hb-clause">uniform_barriers</div>
+            <svg class="hb-svg" viewBox="0 0 252 178">
+              <text x="126" y="16" text-anchor="middle" font-size="10.5" fill="var(--fg-muted)">all CTA threads must arrive</text>
+              <g font-family="JetBrains Mono, monospace" font-size="10" font-weight="700">
+                <circle cx="48" cy="40" r="13" fill="var(--emerald-soft)" stroke="var(--emerald-border)" stroke-width="2"/>
+                <text x="48" y="44" text-anchor="middle" fill="var(--emerald-text)">t0</text>
+                <circle cx="96" cy="40" r="13" fill="var(--emerald-soft)" stroke="var(--emerald-border)" stroke-width="2"/>
+                <text x="96" y="44" text-anchor="middle" fill="var(--emerald-text)">t1</text>
+                <circle cx="144" cy="40" r="13" fill="var(--emerald-soft)" stroke="var(--emerald-border)" stroke-width="2"/>
+                <text x="144" y="44" text-anchor="middle" fill="var(--emerald-text)">t2</text>
+                <circle id="divT3Circle" cx="192" cy="40" r="13" fill="var(--red-soft)" stroke="var(--red-border)" stroke-width="2"/>
+                <text id="divT3Text" x="192" y="44" text-anchor="middle" fill="var(--red-text)">t3</text>
+              </g>
+
+              <line x1="48" y1="55" x2="48" y2="122" stroke="var(--emerald-border)" stroke-width="1.6" stroke-dasharray="3 3"/>
+              <line x1="96" y1="55" x2="96" y2="122" stroke="var(--emerald-border)" stroke-width="1.6" stroke-dasharray="3 3"/>
+              <line x1="144" y1="55" x2="144" y2="122" stroke="var(--emerald-border)" stroke-width="1.6" stroke-dasharray="3 3"/>
+
+              <circle cx="48" cy="56" r="4.5" fill="var(--emerald-border)" class="anim-pkt-down"/>
+              <circle cx="96" cy="56" r="4.5" fill="var(--emerald-border)" class="anim-pkt-down"/>
+              <circle cx="144" cy="56" r="4.5" fill="var(--emerald-border)" class="anim-pkt-down"/>
+
+              <!-- Buggy early return path -->
+              <g id="divBugExit">
+                <path d="M 192 55 Q 196 82 228 90" fill="none" stroke="var(--red-border)" stroke-width="1.8" stroke-dasharray="3 3"/>
+                <circle cx="192" cy="55" r="5" fill="var(--red-border)" class="anim-early-exit"/>
+                <text x="220" y="108" text-anchor="middle" font-family="JetBrains Mono, monospace" font-size="9" font-weight="700" fill="var(--red-text)">return;</text>
+              </g>
+
+              <!-- Safe uniform arrival path -->
+              <g id="divSafeArrive" style="display:none">
+                <line x1="192" y1="55" x2="192" y2="122" stroke="var(--emerald-border)" stroke-width="1.6" stroke-dasharray="3 3"/>
+                <circle cx="192" cy="56" r="4.5" fill="var(--emerald-border)" class="anim-pkt-down"/>
+              </g>
+
+              <!-- Barrier bar (wider with clean padding) -->
+              <rect id="divBarRect" x="20" y="126" width="212" height="30" rx="6" fill="var(--amber-bg)" stroke="var(--amber-border)" stroke-width="1.8"/>
+              <text id="divBarText" x="126" y="145" text-anchor="middle" font-family="JetBrains Mono, monospace" font-size="10" font-weight="700" fill="var(--amber-text)">sync_threads() · 3/4 stall</text>
+            </svg>
+            <div class="hb-status" id="hstatus3">
+              <code>t3</code> returns early inside an <code>if</code>, leaving the block deadlocked or desynced.
+            </div>
+          </div>
+        </div>
+
+        <div class="viz-caption">
+          Toggle between <strong>Without #[verify]</strong> and <strong>With #[verify]</strong> to see how bounds, barrier phases, and uniform arrival behave across threads.
+        </div>
+      </section>
+
+      <p>
+        Until now, the moment your kernel staged tiles in shared memory, synchronized across warps, or needed bounds checks stripped out of a hot inner loop, you had to reach for <code>unsafe</code> or <code>--unchecked-indexing</code>.
+      </p>
+
+      <h2>How It Works</h2>
+      <p>
+        The core idea is <strong>specify and verify</strong>. You write a small specification on your Rust kernel stating <em>what</em> safety properties hold, and the compiler takes a quick detour during compilation to verify them before generating PTX:
+      </p>
+      <ul>
+        <li><strong>1. Specify on the kernel</strong>: You attach attributes like <code>no_oob_idx</code>, <code>no_data_race</code>, or <code>uniform_barriers</code> to state what is safe, along with any host launch preconditions (such as <code>a.len() &gt;= c.len()</code>).</li>
+        <li><strong>2. Take a compiler detour</strong>: Halfway through compiling the kernel (right after stack variables become SSA registers, and before loops are unrolled), the compiler pauses in memory. At this point, loops are still compact basic blocks and every slice or shared-array access still has its explicit bounds check sitting right in front of it.</li>
+        <li><strong>3. Verify against the spec</strong>: The compiler collects those instructions and barriers, translates them line by line into Lean 4, and proves your specification holds across every active GPU thread (ignoring floating-point math, since float values never change <em>which</em> memory slot a thread touches).</li>
+        <li><strong>4. Erase proven checks</strong>: Once the proof passes, the compiler deletes the proven bounds checks in memory and continues lowering to PTX. If a property fails, compilation stops right there.</li>
+      </ul>
+
+      <!-- ===============================================================
+           ANIMATED VISUAL 2: THE 4-STAGE PROOF DETOUR PIPELINE
+           =============================================================== -->
+      <section class="viz-card" aria-label="The Proof Detour compilation pipeline">
+        <div class="viz-header">
+          <div class="viz-title-group">
+            <span class="viz-eyebrow">Visual 2 &middot; Specify &amp; Verify</span>
+            <h3 class="viz-title">The Proof Detour: Collect, Verify, and Erase Checks</h3>
+          </div>
+          <div class="viz-controls">
+            <button class="seg-btn active-neutral" id="btnPipePlay" type="button">Pause animation</button>
+          </div>
+        </div>
+
+        <div class="pipeline-grid" id="pipelineGrid">
+          <!-- Stage 1 -->
+          <div class="pipe-stage s-rust active" data-stage="0">
+            <div>
+              <span class="ps-badge">Step 1 &middot; Specify</span>
+              <div class="ps-title">Safe Rust Kernel</div>
+              <div class="ps-sub">Declare safety rules</div>
+            </div>
+            <div class="ps-code">
+              <span style="color:var(--blue-border);font-weight:600">#[launch_contract(</span><br>
+              &nbsp;&nbsp;requires = (<br>
+              &nbsp;&nbsp;&nbsp;&nbsp;a.len &gt;= c.len<br>
+              &nbsp;&nbsp;)<br>
+              <span style="color:var(--blue-border);font-weight:600">)]</span><br>
+              <span style="color:var(--emerald-border);font-weight:600">#[verify(</span><br>
+              &nbsp;&nbsp;no_oob_idx(a, b, c)<br>
+              <span style="color:var(--emerald-border);font-weight:600">)]</span>
+            </div>
+          </div>
+
+          <!-- Stage 2 -->
+          <div class="pipe-stage s-mir" data-stage="1">
+            <div>
+              <span class="ps-badge">Step 2 &middot; Detour</span>
+              <div class="ps-title">Pause in MIR</div>
+              <div class="ps-sub">Collect SSA + checks</div>
+            </div>
+            <div class="ps-code">
+              ^in_bounds:<br>
+              <span class="assert-line" id="mirAssert1">mir.assert(idx &lt; a.len)</span>
+              v1 = mir.load(a[idx])<br>
+              <span class="assert-line" id="mirAssert2">mir.assert(idx &lt; b.len)</span>
+              v2 = mir.load(b[idx])<br>
+              mir.store(c[idx], v1+v2)
+            </div>
+          </div>
+
+          <!-- Stage 3 -->
+          <div class="pipe-stage s-lean" data-stage="2">
+            <div>
+              <span class="ps-badge">Step 3 &middot; Verify</span>
+              <div class="ps-title">Check Spec in Lean 4</div>
+              <div class="ps-sub">Prove bounds &amp; barriers</div>
+            </div>
+            <div class="ps-code">
+              def mirFunc : MirFunc<br>
+              theorem verify_no_oob :<br>
+              &nbsp;&nbsp;MirNoOobGlobal ... :=<br>
+              &nbsp;&nbsp;by mir_vc mirFunc<br>
+              <span id="leanQedBadge" style="color:var(--emerald-border);font-weight:700;opacity:0.45;transition:opacity 0.3s">&#10003; 0 sorryAx (QED)</span>
+            </div>
+          </div>
+
+          <!-- Stage 4 -->
+          <div class="pipe-stage s-ptx" data-stage="3">
+            <div>
+              <span class="ps-badge">Step 4 &middot; Resume</span>
+              <div class="ps-title">Emitted PTX</div>
+              <div class="ps-sub">Proven checks erased!</div>
+            </div>
+            <div class="ps-code">
+              <span class="ptx-trap-line" id="ptxTrap1">setp.ge %p1, idx, len;</span>
+              <span class="ptx-trap-line" id="ptxTrap2">@%p1 bra trap;</span>
+              ld.global.f32 %f1, [a];<br>
+              ld.global.f32 %f2, [b];<br>
+              add.f32 %f3, %f1, %f2;<br>
+              st.global.f32 [c], %f3;<br>
+              <span id="ptxZeroTrap" style="color:var(--emerald-border);font-weight:700">// 0 trap branches</span>
+            </div>
+          </div>
+        </div>
+
+        <div class="pipe-status-bar">
+          <div id="pipeStatusText">
+            <strong>Step 1 (Specify):</strong> You declare <em>what</em> safety properties hold on the Rust kernel.
+          </div>
+          <div class="pipe-step-dots" id="pipeDots">
+            <span class="pipe-dot on"></span>
+            <span class="pipe-dot"></span>
+            <span class="pipe-dot"></span>
+            <span class="pipe-dot"></span>
+          </div>
+        </div>
+        <div class="viz-caption">
+          Click any stage card above (or watch the loop) to see the detour verify the specification and erase <code>mir.assert</code> checks before PTX emission.
+        </div>
+      </section>
+
+      <p>
+        Once Lean 4 verifies every safety theorem with zero <code>sorryAx</code> axioms, the compiler deletes the proven <code>mir.assert</code> bounds checks in memory and resumes normal lowering through LLVM to emitted PTX.
+      </p>
+
+      <h2>What It Looks Like in Practice</h2>
+      <p>
+        Here is a complete vector-add kernel using a plain mutable Rust slice <code>c: &amp;mut [f32]</code>, zero wrapper types, and zero <code>unsafe</code>:
+      </p>
+
+      <div class="code-card">
+        <div class="code-card-header">
+          <span>examples/safe_vecadd/src/main.rs</span>
+          <span>100% Safe Rust &middot; 3 bounds checks erased</span>
+        </div>
+        <pre><code><span class="tok-contract">#[launch_contract(
+    domain = 1,
+    block = (256, 1, 1),
+    requires = (a.len() &gt;= c.len(), b.len() &gt;= c.len()),
+)]</span>
+<span class="tok-attr">#[verify(no_oob_idx(a, b, c), disjoint_writes(c), writes_all_elems(c))]</span>
+<span class="tok-attr">#[kernel]</span>
+<span class="tok-kw">pub fn</span> <span class="tok-fn">vecadd</span>(a: &amp;[<span class="tok-ty">f32</span>], b: &amp;[<span class="tok-ty">f32</span>], c: &amp;<span class="tok-kw">mut</span> [<span class="tok-ty">f32</span>]) {
+    <span class="tok-kw">let</span> idx = (thread::blockIdx_x() <span class="tok-kw">as</span> <span class="tok-ty">usize</span>) * (thread::blockDim_x() <span class="tok-kw">as</span> <span class="tok-ty">usize</span>)
+        + (thread::threadIdx_x() <span class="tok-kw">as</span> <span class="tok-ty">usize</span>);
+    <span class="tok-kw">if</span> idx &lt; c.len() {
+        c[idx] = a[idx] + b[idx];
+    }
+}</code></pre>
+      </div>
+
+      <p>
+        Notice <code>c: &amp;mut [f32]</code> in the signature. Normally <code>cuda-oxide</code> rejects a plain mutable slice because two GPU threads could overwrite the same slot, so <code>#[verify]</code> unlocks it once exclusivity is proved. Here is what happens at each stage:
+      </p>
+      <ul>
+        <li><strong>At compile time</strong>: <code>#[verify]</code> proves in Lean 4 that every thread writes to a unique <code>idx</code> (<code>disjoint_writes(c)</code>) and that <code>idx &lt; c.len()</code> keeps all three slice accesses in bounds (<code>no_oob_idx</code>).</li>
+        <li><strong>At launch time</strong>: <code>#[launch_contract]</code> checks <code>a.len() &gt;= c.len()</code> and <code>b.len() &gt;= c.len()</code> once on the CPU before the kernel runs.</li>
+        <li><strong>On the GPU</strong>: All three bounds checks are erased, so threads run with zero check overhead.</li>
+      </ul>
+      <p>
+        And if you sneak in an off-by-one bug like <code>a[idx + 1]</code>? Compilation halts before PTX is ever emitted, and Lean's integer solver hands back a concrete counterexample. Try toggling the bug live below:
+      </p>
+
+      <!-- ===============================================================
+           ANIMATED VISUAL 3: 1-TO-1 TRANSLATION + BREAK IT LIVE
+           =============================================================== -->
+      <section class="viz-card" aria-label="1-to-1 Rust to MIR to Lean 4 inspector">
+        <div class="viz-header">
+          <div class="viz-title-group">
+            <span class="viz-eyebrow">Visual 3 &middot; Line-by-Line Translation</span>
+            <h3 class="viz-title">Inside <code>MirFunc</code> (Click Any Line, or Break It!)</h3>
+          </div>
+          <div class="viz-controls">
+            <button class="seg-btn active-safe" id="btnCodeSafe" type="button">Valid: a[idx] + b[idx]</button>
+            <button class="seg-btn" id="btnCodeBug" type="button">Inject Bug: a[idx + 1]</button>
+          </div>
+        </div>
+
+        <div class="rosetta-cols" id="rosettaCols">
+          <!-- Column 1: Rust -->
+          <div class="rosetta-col rc-rust">
+            <div class="rc-head"><span>1. Rust Source</span><span>#[kernel]</span></div>
+            <div class="rc-rows">
+              <div class="rc-row hl" data-line="0">let idx = bx * 256 + tx;</div>
+              <div class="rc-row" data-line="1">if idx &lt; c.len() {</div>
+              <div class="rc-row" data-line="2" id="rustLineLoad">&nbsp;&nbsp;let x = a[idx];</div>
+              <div class="rc-row" data-line="3">&nbsp;&nbsp;let sum = x + b[idx];</div>
+              <div class="rc-row" data-line="4">&nbsp;&nbsp;c[idx] = sum;</div>
+            </div>
+          </div>
+
+          <!-- Column 2: Pliron SSA MIR -->
+          <div class="rosetta-col rc-mir">
+            <div class="rc-head"><span>2. PostMem2Reg MIR</span><span>Pliron SSA</span></div>
+            <div class="rc-rows">
+              <div class="rc-row hl" data-line="0">v6 = nvvm.index_1d()</div>
+              <div class="rc-row" data-line="1">v8 = mir.lt(v6, c.len)<br>mir.cond_br v8 ^bb1, ^exit</div>
+              <div class="rc-row" data-line="2" id="mirLineLoad">mir.assert(v6 &lt; a.len)<br>v11 = mir.load(&amp;a[v6])</div>
+              <div class="rc-row" data-line="3">v15 = mir.fadd(v11, v14)</div>
+              <div class="rc-row" data-line="4">mir.store(&amp;c[v6], v15)</div>
+            </div>
+          </div>
+
+          <!-- Column 3: Lean 4 MirFunc -->
+          <div class="rosetta-col rc-lean">
+            <div class="rc-head"><span>3. Lean 4 MirFunc</span><span>1-to-1 AST</span></div>
+            <div class="rc-rows">
+              <div class="rc-row hl" data-line="0">(.assign 6 .index1D)</div>
+              <div class="rc-row" data-line="1">(.assign 8 (.cmpOp .lt 6 7))<br>(.condBr 8 1 [] 2 [])</div>
+              <div class="rc-row" data-line="2" id="leanLineLoad">(.assertCond 0 9)<br>(.assign 11 (.load 10))</div>
+              <div class="rc-row" data-line="3">(.assign 15 .opaqueVal)</div>
+              <div class="rc-row" data-line="4">(.store 17 15)</div>
+            </div>
+          </div>
+        </div>
+
+        <div class="lean-terminal term-ok" id="leanTerminal">
+          <div class="term-ok-badge">$ lake env lean Vecadd.lean -&gt; PASS (0 sorryAx)</div>
+          <div>&bull; Proved <code>idx &lt; c.len &and; c.len &le; a.len &rarr; idx &lt; a.len</code> via Lean's integer solver</div>
+          <div>&bull; Proved <code>bx&#8321;*256 + tx&#8321; = bx&#8322;*256 + tx&#8322; &rarr; t&#8321; = t&#8322;</code> (<code>MirDisjointWrites</code>)</div>
+          <div>&bull; Action: Erased all 3 <code>mir.assert</code> ops in memory; proceeding to LLVM/PTX.</div>
+        </div>
+
+        <div class="viz-caption" id="rosettaCaption">
+          Click any row to trace a single instruction across Rust, Pliron SSA, and Lean 4, or click <strong>Inject Bug: a[idx + 1]</strong> to see Lean reject it.
+        </div>
+      </section>
+
+      <h2>Scaling Up: 2.118 PFLOP/s on NVIDIA B200</h2>
+      <p>
+        Proving vector addition is a nice sanity check, so we pushed the exact same line-by-line engine all the way up to a full speed-of-light <strong>2-CTA persistent BF16 GEMM</strong> on Blackwell (<code>safe_gemm_sol_final</code>, 338 MIR basic blocks).
+      </p>
+      <p>
+        Because <code>MirFunc</code> and <code>ControlFlowCfg</code> verify individual instructions rather than hardcoded indexing shapes, the same proof library verifies a warp-specialized 2-block cluster pipeline:
+      </p>
+      <ul>
+        <li><strong>Warp 4 (Producer + Work-Stealing)</strong> streams A and B tiles into a 7-stage, <code>224 KiB</code> shared-memory ring via 2-CTA multicast TMA while pulling next-tile coordinates from hardware Cluster Launch Control (<code>CLC</code>).</li>
+        <li><strong>Warp 5 (2-CTA Tensor Cores)</strong> issues cooperative 5th-gen <code>tcgen05.mma</code> instructions into two alternating 256-column halves of 512-column Tensor Memory (<code>TMEM</code>).</li>
+        <li><strong>Warps 0..3 (Epilogue)</strong> unload 32-lane <code>TMEM</code> windows into registers and write out BF16 results.</li>
+      </ul>
+
+      <!-- ===============================================================
+           ANIMATED VISUAL 4: BLACKWELL 2-CTA GEMM + B200 BENCHMARK
+           =============================================================== -->
+      <section class="viz-card" aria-label="Verified 2-CTA Blackwell GEMM pipeline and B200 performance">
+        <div class="viz-header">
+          <div class="viz-title-group">
+            <span class="viz-eyebrow">Visual 4 &middot; NVIDIA B200 (sm_100a)</span>
+            <h3 class="viz-title">Verified 2-CTA Blackwell GEMM: Zero Safety Overhead at 2.12 PFLOP/s</h3>
+          </div>
+        </div>
+
+        <div class="bw-stages">
+          <!-- Producer -->
+          <div class="bw-card bw-prod">
+            <div>
+              <div class="bw-role">Warp 4 &middot; Producer + CLC</div>
+              <div class="bw-head">7-Stage TMA Ring (224 KiB)</div>
+              <div class="ring-slots" id="ringSlots">
+                <div class="ring-slot active-fill">S0</div>
+                <div class="ring-slot">S1</div>
+                <div class="ring-slot">S2</div>
+                <div class="ring-slot">S3</div>
+                <div class="ring-slot active-read">S4</div>
+                <div class="ring-slot">S5</div>
+                <div class="ring-slot">S6</div>
+              </div>
+            </div>
+            <div class="bw-foot">&#10003; Proved: no_oob_idx + no_data_race</div>
+          </div>
+
+          <div class="bw-arrow">&rarr;</div>
+
+          <!-- MMA -->
+          <div class="bw-card bw-mma">
+            <div>
+              <div class="bw-role">Warp 5 &middot; 2-CTA Tensor Core</div>
+              <div class="bw-head">512-Col TMEM Ping-Pong</div>
+              <div class="tmem-halves">
+                <div class="tmem-half ping" id="tmemHalf0">Stage 0<br>[0..256]</div>
+                <div class="tmem-half" id="tmemHalf1">Stage 1<br>[256..512]</div>
+              </div>
+            </div>
+            <div class="bw-foot">&#10003; Proved: tmem_lifecycle (cta_group::2)</div>
+          </div>
+
+          <div class="bw-arrow">&rarr;</div>
+
+          <!-- Epilogue -->
+          <div class="bw-card bw-epi">
+            <div>
+              <div class="bw-role">Warps 0..3 &middot; Epilogue</div>
+              <div class="bw-head">Parallel TMEM Unload</div>
+              <div class="epi-lanes">
+                <div class="epi-lane">W0<br>0..32</div>
+                <div class="epi-lane">W1<br>32..64</div>
+                <div class="epi-lane">W2<br>64..96</div>
+                <div class="epi-lane">W3<br>96..128</div>
+              </div>
+            </div>
+            <div class="bw-foot">&#10003; 27 checks erased &middot; 0 B spills</div>
+          </div>
+        </div>
+
+        <div class="bench-panel">
+          <div class="bench-head">
+            <span>NVIDIA B200 BF16 GEMM Throughput (TFLOP/s)</span>
+            <div class="bench-legend">
+              <span><span class="leg-swatch" style="background:#64748b"></span>Unsafe (--unchecked-indexing)</span>
+              <span><span class="leg-swatch" style="background:var(--emerald-border)"></span>Lean-Verified Safe (#[verify])</span>
+            </div>
+          </div>
+
+          <div class="bench-row">
+            <div class="bench-size">4096&sup3;</div>
+            <div class="bench-bars">
+              <div class="bar-track"><div class="bar-fill bar-unsafe" style="width: 85.1%">1,855.5</div></div>
+              <div class="bar-track"><div class="bar-fill bar-safe" style="width: 85.3%">1,858.4</div></div>
+            </div>
+            <div class="bench-pct">100.15%</div>
+          </div>
+
+          <div class="bench-row">
+            <div class="bench-size">8192&sup3;</div>
+            <div class="bench-bars">
+              <div class="bar-track"><div class="bar-fill bar-unsafe" style="width: 95.5%">2,081.4</div></div>
+              <div class="bar-track"><div class="bar-fill bar-safe" style="width: 95.6%">2,082.3</div></div>
+            </div>
+            <div class="bench-pct">100.04%</div>
+          </div>
+
+          <div class="bench-row">
+            <div class="bench-size">16384&sup3;</div>
+            <div class="bench-bars">
+              <div class="bar-track"><div class="bar-fill bar-unsafe" style="width: 97.2%">2,118.1</div></div>
+              <div class="bar-track"><div class="bar-fill bar-safe" style="width: 97.3%">2,118.4</div></div>
+            </div>
+            <div class="bench-pct">100.01%</div>
+          </div>
+        </div>
+
+        <div class="viz-caption">
+          Live simulation of the 7-stage TMA ring and 2-stage TMEM ping-pong verified by Lean 4, alongside back-to-back B200 measurements.
+        </div>
+      </section>
+
+      <h2>Trust Boundary and Summary</h2>
+      <p>
+        We want to be clear about what is proved and what sits in our Trusted Computing Base (TCB) today:
+      </p>
+      <ul>
+        <li><strong>Proved in Lean 4 (<code>0 sorryAx</code>)</strong>: Slice, shared-memory, and <code>TMEM</code> bounds, race freedom across barrier phases and <code>mbarrier</code> handoffs, disjoint writes, and uniform barriers on the <code>PostMem2Reg</code> MIR model.</li>
+        <li><strong>Trusted Computing Base (not proved today)</strong>:
+          <ul>
+            <li><strong>Rust to SSA MIR</strong> (<code>mir-importer</code>, <code>mem2reg</code>): Lowering Rust into in-memory <code>PostMem2Reg</code> IR.</li>
+            <li><strong>The 1-to-1 transcriber</strong> (<code>lean-exporter</code>): Copying MIR blocks and barriers into Lean 4 (failing closed on unsupported ops).</li>
+            <li><strong>Downstream PTX lowering</strong> (<code>mir-lower</code>, LLVM, <code>ptxas</code>): Lowering the IR to emitted PTX after proven bounds checks are erased.</li>
+            <li><strong>Host launch checks &amp; CUDA runtime</strong>: Checking grid dimensions and <code>requires</code> length rules on the CPU before launch.</li>
+          </ul>
+        </li>
+      </ul>
+
+      <h3 class="summary-subhead">What <code>#[verify]</code> Gives You</h3>
+      <ul>
+        <li><strong>Declarative safety contracts</strong>: Six small clauses (<code>no_oob_idx</code>, <code>no_data_race</code>, <code>disjoint_writes</code>, <code>writes_all_elems</code>, <code>uniform_barriers</code>, <code>tmem_lifecycle</code>) in normal Rust, with zero inline loop invariants or ghost code.</li>
+        <li><strong>Deterministic, reusable proofs</strong>: Soundness theorems for our MIR and barrier analyzers are proved once in Lean 4 (<code>0 sorryAx</code>) and applied automatically per kernel.</li>
+        <li><strong>Safe SIMT without <code>unsafe</code></strong>: Unlocks <code>&amp;mut [T]</code>, <code>SharedArray</code>, barriers, 2-CTA clusters, and Blackwell <code>tcgen05</code> / <code>TMEM</code> in safe Rust.</li>
+        <li><strong>Zero GPU bounds-check tax</strong>: Proven <code>mir.assert</code> checks are erased in memory before PTX lowering (<code>2.118 PFLOP/s</code> on B200).</li>
+      </ul>
+
+      <h3 class="summary-subhead">What to Watch Out For</h3>
+      <ul>
+        <li><strong>Longer compile times</strong>: Running Lean 4 during <code>cargo oxide build</code> adds build time that grows with kernel size and the number of preconditions and <code>#[verify]</code> clauses.</li>
+        <li><strong>Fail-closed MIR subset</strong>: Instructions or control-flow shapes not yet modeled in <code>MirFunc</code> fail closed at compile time rather than falling back silently.</li>
+        <li><strong>Raw solver diagnostics</strong>: Failed bounds proofs currently print raw integer-solver inequalities (<code>cargo oxide lean-export</code> helps inspect them, and friendlier error mapping is still ahead).</li>
+        <li><strong>Early-preview sharp edges</strong>: Attribute syntax will evolve, and there are likely bugs or soundness corners in the transcriber that we want help uncovering.</li>
+      </ul>
+
+      <p>
+        You can inspect the live MIR and generated Lean 4 theorems on any verified kernel with one command:
+      </p>
+
+      <div class="code-card">
+        <div class="code-card-header">
+          <span>Terminal</span>
+          <span>Inspect MIR + Lean 4 theorems</span>
+        </div>
+        <pre><code>cargo oxide lean-export safe_vecadd</code></pre>
+      </div>
+
+      <div class="cta-box">
+        <h3>Help Us Stress-Test the Preview</h3>
+        <p style="margin-bottom:0">
+          This is our first public preview of compile-time Lean 4 kernel verification in <code>cuda-oxide</code> (<a href="https://github.com/NVIDIA/cuda-rust/pull/1851" target="_blank" rel="noopener">PR #1851</a>). Unsupported MIR patterns fail closed at compile time, syntax will evolve, and there are almost certainly bugs and soundness edge cases waiting to be found. If you enjoy Rust, GPU kernels, compilers, or Lean 4, take it for a spin, try to break the verifier, and open an issue with whatever you hit!
+        </p>
+      </div>
+    </article>
+  </main>
+
+  <script>
+    // 1. Reading progress bar + Light/Dark theme toggle
+    const progressBar = document.getElementById('progressBar');
+    window.addEventListener('scroll', () => {
+      const h = document.documentElement;
+      const pct = (h.scrollTop / Math.max(1, h.scrollHeight - h.clientHeight)) * 100;
+      progressBar.style.width = Math.min(100, Math.max(0, pct)) + '%';
+    }, { passive: true });
+
+    const themeToggle = document.getElementById('themeToggle');
+    function syncThemeBtn() {
+      const cur = document.documentElement.getAttribute('data-theme');
+      themeToggle.textContent = cur === 'dark' ? 'Light mode' : 'Dark mode';
+    }
+    syncThemeBtn();
+    themeToggle.addEventListener('click', () => {
+      const root = document.documentElement;
+      const next = root.getAttribute('data-theme') === 'dark' ? 'light' : 'dark';
+      root.setAttribute('data-theme', next);
+      localStorage.setItem('np-theme', next);
+      syncThemeBtn();
+    });
+
+    // 2. Visual 1: Toggle between SIMT Bugs and #[verify] Safe Mode
+    const btnHazardBuggy = document.getElementById('btnHazardBuggy');
+    const btnHazardSafe = document.getElementById('btnHazardSafe');
+
+    function setHazardMode(safe) {
+      btnHazardBuggy.className = safe ? 'seg-btn' : 'seg-btn active-danger';
+      btnHazardSafe.className = safe ? 'seg-btn active-safe' : 'seg-btn';
+
+      ['hbox1', 'hbox2', 'hbox3'].forEach(id => {
+        const el = document.getElementById(id);
+        el.classList.toggle('is-safe', safe);
+        el.classList.toggle('is-buggy', !safe);
+      });
+
+      // Card 1: OOB
+      document.getElementById('oobBugGroup').style.display = safe ? 'none' : 'block';
+      document.getElementById('oobGuardGroup').style.display = safe ? 'block' : 'none';
+      document.getElementById('oobT3Circle').setAttribute('stroke', safe ? 'var(--blue-border)' : 'var(--red-border)');
+      document.getElementById('oobT3Circle').setAttribute('fill', safe ? 'var(--blue-soft)' : 'var(--red-soft)');
+      document.getElementById('oobT3Text').setAttribute('fill', safe ? 'var(--blue-text)' : 'var(--red-text)');
+      document.getElementById('hstatus1').innerHTML = safe
+        ? 'Lean 4 proves active threads stay strictly below <code>buf.len()</code> and erases the check.'
+        : 'Thread <code>t3</code> walks past <code>buf.len()</code> and corrupts adjacent memory.';
+
+      // Card 2: Shared-Memory Race
+      document.getElementById('raceBugGroup').style.display = safe ? 'none' : 'block';
+      document.getElementById('raceSafeGroup').style.display = safe ? 'block' : 'none';
+      document.getElementById('raceSubLabel').textContent = safe
+        ? 'Phase 0 write -> barrier -> Phase 1 read'
+        : 'same phase, no barrier between threads';
+      document.getElementById('hstatus2').innerHTML = safe
+        ? '<code>t1</code> writes <code>TILE[1]</code> before the barrier; <code>t2</code> reads it only after.'
+        : '<code>t1</code> writes while <code>t2</code> reads <code>TILE[1]</code> in the same step without a barrier.';
+
+      // Card 3: Divergent Barrier
+      document.getElementById('divBugExit').style.display = safe ? 'none' : 'block';
+      document.getElementById('divSafeArrive').style.display = safe ? 'block' : 'none';
+      document.getElementById('divT3Circle').setAttribute('stroke', safe ? 'var(--emerald-border)' : 'var(--red-border)');
+      document.getElementById('divT3Circle').setAttribute('fill', safe ? 'var(--emerald-soft)' : 'var(--red-soft)');
+      document.getElementById('divT3Text').setAttribute('fill', safe ? 'var(--emerald-text)' : 'var(--red-text)');
+      const dRect = document.getElementById('divBarRect');
+      const dText = document.getElementById('divBarText');
+      dRect.setAttribute('fill', safe ? 'var(--emerald-bg)' : 'var(--amber-bg)');
+      dRect.setAttribute('stroke', safe ? 'var(--emerald-border)' : 'var(--amber-border)');
+      dText.setAttribute('fill', safe ? 'var(--emerald-text)' : 'var(--amber-text)');
+      dText.textContent = safe ? 'sync_threads() · 4/4 arrive' : 'sync_threads() · 3/4 stall';
+      document.getElementById('hstatus3').innerHTML = safe
+        ? 'Control-flow state machine proves all 4 threads arrive at every barrier.'
+        : '<code>t3</code> returns early inside an <code>if</code>, leaving the block deadlocked or desynced.';
+    }
+
+    btnHazardBuggy.addEventListener('click', () => setHazardMode(false));
+    btnHazardSafe.addEventListener('click', () => setHazardMode(true));
+    if (window.location.search.includes('safe=1')) setHazardMode(true);
+
+    // 3. Visual 2: 4-Stage Pipeline Animation
+    const pipeStages = Array.from(document.querySelectorAll('.pipe-stage'));
+    const pipeDots = Array.from(document.querySelectorAll('.pipe-dot'));
+    const pipeStatusText = document.getElementById('pipeStatusText');
+    const btnPipePlay = document.getElementById('btnPipePlay');
+    const mirAssert1 = document.getElementById('mirAssert1');
+    const mirAssert2 = document.getElementById('mirAssert2');
+    const ptxTrap1 = document.getElementById('ptxTrap1');
+    const ptxTrap2 = document.getElementById('ptxTrap2');
+    const leanQedBadge = document.getElementById('leanQedBadge');
+
+    const stageMessages = [
+      '<strong>Step 1 (Specify):</strong> You declare <em>what</em> safety properties hold on the Rust kernel.',
+      '<strong>Step 2 (Detour):</strong> The compiler pauses in memory before loop unrolling and collects the SSA blocks and bounds checks.',
+      '<strong>Step 3 (Verify):</strong> Lean 4 checks your kernel line by line against the specification with <code>0 sorryAx</code>.',
+      '<strong>Step 4 (Resume):</strong> Proven <code>mir.assert</code> checks are erased in memory, producing PTX with zero trap branches!'
+    ];
+
+    let curStage = 0;
+    let pipePlaying = true;
+
+    function renderPipeStage(idx) {
+      curStage = idx;
+      pipeStages.forEach((el, i) => el.classList.toggle('active', i === idx));
+      pipeDots.forEach((el, i) => el.classList.toggle('on', i <= idx));
+      pipeStatusText.innerHTML = stageMessages[idx];
+
+      leanQedBadge.style.opacity = idx >= 2 ? '1' : '0.4';
+      const erased = idx === 3;
+      mirAssert1.classList.toggle('erased', erased);
+      mirAssert2.classList.toggle('erased', erased);
+      ptxTrap1.classList.toggle('vanished', erased);
+      ptxTrap2.classList.toggle('vanished', erased);
+    }
+
+    pipeStages.forEach((el, idx) => {
+      el.addEventListener('click', () => {
+        pipePlaying = false;
+        btnPipePlay.textContent = 'Resume animation';
+        renderPipeStage(idx);
+      });
+    });
+
+    btnPipePlay.addEventListener('click', () => {
+      pipePlaying = !pipePlaying;
+      btnPipePlay.textContent = pipePlaying ? 'Pause animation' : 'Resume animation';
+    });
+
+    setInterval(() => {
+      if (pipePlaying) {
+        renderPipeStage((curStage + 1) % 4);
+      }
+    }, 2600);
+
+    // 4. Visual 3: Interactive 1-to-1 Rosetta Stone + Break It Toggle
+    const btnCodeSafe = document.getElementById('btnCodeSafe');
+    const btnCodeBug = document.getElementById('btnCodeBug');
+    const allRosettaRows = Array.from(document.querySelectorAll('.rc-row'));
+    const leanTerminal = document.getElementById('leanTerminal');
+    const rustLineLoad = document.getElementById('rustLineLoad');
+    const mirLineLoad = document.getElementById('mirLineLoad');
+    const leanLineLoad = document.getElementById('leanLineLoad');
+    const rosettaCaption = document.getElementById('rosettaCaption');
+
+    let selectedLine = 0;
+    let codeHasBug = false;
+    let rosettaAutoCycle = true;
+
+    const lineNotes = [
+      'Line 1: Hardware thread coordinates become a single 1-to-1 <code>.index1D</code> instruction in Lean (<code>bx * 256 + tx</code>).',
+      'Line 2: The bounds guard <code>idx &lt; c.len()</code> becomes a conditional branch into the active block.',
+      'Line 3: The slice load carries its <code>mir.assert</code> check directly into Lean so <code>mir_vc</code> can prove it redundant.',
+      'Line 4: Floating-point math (<code>fadd</code>) maps to <code>.opaqueVal</code> because float values never affect memory addresses.',
+      'Line 5: Writing <code>c[idx]</code> emits a global write event checked for both bounds and cross-thread disjointness.'
+    ];
+
+    function highlightRosetta(lineIdx) {
+      selectedLine = lineIdx;
+      allRosettaRows.forEach(r => {
+        const match = Number(r.dataset.line) === lineIdx;
+        r.classList.toggle('hl', match);
+        r.classList.toggle('hl-bug', codeHasBug && Number(r.dataset.line) === 2 && match);
+      });
+      if (!codeHasBug) {
+        rosettaCaption.innerHTML = lineNotes[lineIdx];
+      }
+    }
+
+    allRosettaRows.forEach(r => {
+      r.addEventListener('click', () => {
+        rosettaAutoCycle = false;
+        highlightRosetta(Number(r.dataset.line));
+      });
+    });
+
+    function setCodeBugMode(buggy) {
+      codeHasBug = buggy;
+      rosettaAutoCycle = !buggy;
+      btnCodeSafe.className = buggy ? 'seg-btn' : 'seg-btn active-safe';
+      btnCodeBug.className = buggy ? 'seg-btn active-danger' : 'seg-btn';
+
+      if (buggy) {
+        rustLineLoad.innerHTML = '&nbsp;&nbsp;let x = <span style="text-decoration:underline wavy">a[idx + 1]</span>;';
+        mirLineLoad.innerHTML = 'off = mir.add(v6, 1)<br>mir.assert(off &lt; a.len)';
+        leanLineLoad.innerHTML = '(.binOp .add 64 6 c1)<br>(.assertCond 0 9)';
+        highlightRosetta(2);
+
+        leanTerminal.className = 'lean-terminal term-err';
+        leanTerminal.innerHTML =
+          '<div class="term-err-badge">$ lake env lean Vecadd.lean -&gt; COMPILATION STOPPED (counterexample found)</div>' +
+          '<div>&bull; Goal failed: <code>idx &lt; c.len &and; c.len &le; a.len &rarr; idx + 1 &lt; a.len</code></div>' +
+          '<div>&bull; Counterexample: <code>a.len() = 10, c.len() = 10, idx = 9</code> &rarr; passes <code>9 &lt; 10</code>, reads <code>a[10]</code> (OOB!)</div>' +
+          '<div>&bull; Action: Aborted before PTX codegen.</div>';
+        rosettaCaption.innerHTML = 'With <code>a[idx + 1]</code>, thread 9 passes <code>9 &lt; 10</code> and walks off the end of a 10-element input slice. Lean catches it at compile time!';
+      } else {
+        rustLineLoad.innerHTML = '&nbsp;&nbsp;let x = a[idx];';
+        mirLineLoad.innerHTML = 'mir.assert(v6 &lt; a.len)<br>v11 = mir.load(&amp;a[v6])';
+        leanLineLoad.innerHTML = '(.assertCond 0 9)<br>(.assign 11 (.load 10))';
+        highlightRosetta(0);
+
+        leanTerminal.className = 'lean-terminal term-ok';
+        leanTerminal.innerHTML =
+          '<div class="term-ok-badge">$ lake env lean Vecadd.lean -&gt; PASS (0 sorryAx)</div>' +
+          '<div>&bull; Proved <code>idx &lt; c.len &and; c.len &le; a.len &rarr; idx &lt; a.len</code> via Lean\'s integer solver</div>' +
+          '<div>&bull; Proved <code>bx&#8321;*256 + tx&#8321; = bx&#8322;*256 + tx&#8322; &rarr; t&#8321; = t&#8322;</code> (<code>MirDisjointWrites</code>)</div>' +
+          '<div>&bull; Action: Erased all 3 <code>mir.assert</code> ops in memory; proceeding to LLVM/PTX.</div>';
+      }
+    }
+
+    btnCodeSafe.addEventListener('click', () => setCodeBugMode(false));
+    btnCodeBug.addEventListener('click', () => setCodeBugMode(true));
+
+    setInterval(() => {
+      if (rosettaAutoCycle && !codeHasBug) {
+        highlightRosetta((selectedLine + 1) % 5);
+      }
+    }, 2400);
+
+    // 5. Visual 4: Blackwell 7-stage TMA ring + 2-stage TMEM ping-pong animation
+    const ringSlots = Array.from(document.querySelectorAll('#ringSlots .ring-slot'));
+    const tmemHalf0 = document.getElementById('tmemHalf0');
+    const tmemHalf1 = document.getElementById('tmemHalf1');
+    let ringTick = 0;
+
+    setInterval(() => {
+      ringTick = (ringTick + 1) % 7;
+      const fillSlot = ringTick;
+      const readSlot = (ringTick + 4) % 7;
+      ringSlots.forEach((slot, idx) => {
+        slot.classList.toggle('active-fill', idx === fillSlot);
+        slot.classList.toggle('active-read', idx === readSlot);
+      });
+      const pingZero = (ringTick % 2) === 0;
+      tmemHalf0.classList.toggle('ping', pingZero);
+      tmemHalf1.classList.toggle('ping', !pingZero);
+    }, 950);
+  </script>
+</body>
+</html>
